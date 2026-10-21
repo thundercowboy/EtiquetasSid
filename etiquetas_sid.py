@@ -50,13 +50,13 @@ def carregar_pacientes(path):
                 raise ValueError(f'Nome ausente na linha {row_number}.')
             if isinstance(birth, (datetime, date)):
                 birth = birth.strftime('%d/%m/%Y')
-            elif birth is not None:
+            elif birth is not None and str(birth).strip():
                 try:
                     birth = datetime.strptime(str(birth).strip(), '%d/%m/%Y').strftime('%d/%m/%Y')
                 except ValueError as exc:
                     raise ValueError(f'Data de nascimento inválida na linha {row_number}. Use uma data do Excel ou dd/mm/aaaa.') from exc
             else:
-                raise ValueError(f'Data de nascimento ausente na linha {row_number}.')
+                birth = ''
             patients[key] = dict(numero=key, nome=str(name).strip(), nascimento=birth)
         return patients
     finally:
@@ -168,6 +168,7 @@ class App(tk.Tk):
         self.responsible = ttk.Combobox(editor, state='readonly', width=22)
         self.responsible.grid(row=0, column=3, padx=8)
         ttk.Button(editor, text='Aplicar às selecionadas', command=self.save_fields).grid(row=1, column=1, pady=8, sticky='w')
+        ttk.Button(editor, text='Limpar período', command=self.clear_period).grid(row=1, column=2, padx=8)
         ttk.Button(editor, text='Remover selecionadas', command=self.remove).grid(row=1, column=3)
         controls = ttk.Frame(frame)
         controls.pack(fill='x', pady=12)
@@ -272,6 +273,13 @@ class App(tk.Tk):
                 self.labels[index]['responsavel'] = responsible
             self.tree.item(item, values=[self.labels[index][k] for k in ('numero','nome','nascimento','periodo','responsavel')])
 
+    def clear_period(self):
+        for item in self.tree.selection():
+            index = int(item)
+            self.labels[index]['periodo'] = ''
+            self.tree.item(item, values=[self.labels[index][k] for k in ('numero','nome','nascimento','periodo','responsavel')])
+        self.period.delete(0, 'end')
+
     def remove(self):
         if self.tree.selection():
             for index in sorted((int(item) for item in self.tree.selection()), reverse=True):
@@ -311,8 +319,8 @@ class App(tk.Tk):
                 raise ValueError('Adicione pelo menos uma etiqueta.')
             names = carregar_responsaveis()
             for index, label in enumerate(self.labels, 1):
-                if not label['periodo'] or label['responsavel'] not in names:
-                    raise ValueError(f'Preencha o período e selecione um responsável válido na etiqueta {index}.')
+                if label['responsavel'] not in names:
+                    raise ValueError(f'Selecione um responsável válido na etiqueta {index}.')
             start = int(self.start.get())
             path = filedialog.asksaveasfilename(defaultextension='.pdf', initialfile='etiquetas.pdf', filetypes=[('PDF','*.pdf')])
             if path:

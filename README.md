@@ -1,5 +1,7 @@
 # Etiquetas Sid
 
+Data de nascimento ausente na planilha é aceita e aparece em branco. PERÍODO REF. é opcional. Para apagar o período de várias etiquetas, selecione-as e clique em Limpar período; os outros campos são preservados.
+
 Programa local em Python para preparar etiquetas de pacientes em folhas A4, com 2 colunas e 4 linhas de 99,1 × 67,7 mm.
 
 ## Executar
