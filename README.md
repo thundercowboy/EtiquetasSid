@@ -1,5 +1,11 @@
 # Etiquetas Sid
 
+Para alterar quantidades em lote, selecione linhas com Ctrl/Shift ou Selecionar todas, informe o valor em Qtd. Etiq em lote e clique em Aplicar quantidade às selecionadas. Apenas a quantidade é alterada; o total é atualizado automaticamente. O mínimo é 1.
+
+A coluna Qtd. Etiq aparece após Resp. envio. Dê dois cliques na célula para informar um inteiro maior ou igual a 1. O valor inicial e mínimo é 1; zero não é aceito. O total soma as quantidades e o PDF repete cada etiqueta conforme o número informado, continuando nas próximas páginas quando necessário.
+
+A busca consulta primeiro `BD/BD.xlsx`. Para números não encontrados, consulta `BD/SAAD.xlsx`, também na primeira aba e com os mesmos cabeçalhos. Quando um número existe nas duas planilhas, os dados de BD têm prioridade. O total ao lado de Gerar PDF / imprimir acompanha as etiquetas adicionadas e removidas, incluindo repetições do mesmo paciente.
+
 Data de nascimento ausente na planilha é aceita e aparece em branco. PERÍODO REF. é opcional. Para apagar o período de várias etiquetas, selecione-as e clique em Limpar período; os outros campos são preservados.
 
 Programa local em Python para preparar etiquetas de pacientes em folhas A4, com 2 colunas e 4 linhas de 99,1 × 67,7 mm.

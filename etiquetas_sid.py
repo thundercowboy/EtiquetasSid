@@ -6,11 +6,26 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 
 BASE = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
 DEFAULT_CONFIG = dict(margem_esquerda_mm=3.65, margem_superior_mm=13.1,
                       espaco_horizontal_mm=2.5, espaco_vertical_mm=2.75)
+
+
+def quantidade(value):
+    text = str(value).strip()
+    if not re.fullmatch(r'[0-9]+', text) or int(text) < 1:
+        raise ValueError('Informe uma quantidade inteira maior ou igual a 1.')
+    return int(text)
+
+
+def etiquetas_para_imprimir(labels):
+    return [label for label in labels for _ in range(quantidade(label.get('quantidade', 1)))]
+
+
+def valores_linha(label):
+    return [label[k] for k in ('numero', 'nome', 'nascimento', 'periodo', 'responsavel')] + [label.get('quantidade', 1)]
 
 
 def normalizar_numero(value):
@@ -44,8 +59,6 @@ def carregar_pacientes(path):
                 key = normalizar_numero(number)
             except ValueError as exc:
                 raise ValueError(f'Linha {row_number}: {exc}') from exc
-            if key in patients:
-                raise ValueError(f'Número de paciente duplicado na linha {row_number}.')
             if name is None or not str(name).strip():
                 raise ValueError(f'Nome ausente na linha {row_number}.')
             if isinstance(birth, (datetime, date)):
@@ -57,7 +70,10 @@ def carregar_pacientes(path):
                     raise ValueError(f'Data de nascimento inválida na linha {row_number}. Use uma data do Excel ou dd/mm/aaaa.') from exc
             else:
                 birth = ''
-            patients[key] = dict(numero=key, nome=str(name).strip(), nascimento=birth)
+            patient = dict(numero=key, nome=str(name).strip(), nascimento=birth)
+            if key in patients and patients[key] != patient:
+                raise ValueError(f'Número de paciente duplicado com dados divergentes na linha {row_number}.')
+            patients[key] = patient
         return patients
     finally:
         workbook.close()
@@ -68,6 +84,17 @@ def carregar_responsaveis():
     if not path.exists():
         path.write_text('Roberta Rezende - Nucleo 1\nAmanda Altino - Nucleo 2\nLuana Lopes - Nucleo 3\n', encoding='utf-8')
     return list(dict.fromkeys(line.strip() for line in path.read_text(encoding='utf-8-sig').splitlines() if line.strip()))
+
+
+def buscar_pacientes(keys):
+    patients = carregar_pacientes(BASE / 'BD' / 'BD.xlsx')
+    missing = [key for key in keys if key not in patients]
+    if missing:
+        secondary = carregar_pacientes(BASE / 'BD' / 'SAAD.xlsx')
+        for key in missing:
+            if key in secondary:
+                patients[key] = secondary[key]
+    return patients
 
 
 def gerar_pdf(path, labels, config, start=1):
@@ -142,7 +169,6 @@ class App(tk.Tk):
         header.pack(fill='x')
         ttk.Label(header, text='Etiquetas Sid', font=('Segoe UI', 20, 'bold')).pack(side='left')
         ttk.Checkbutton(header, text='Modo escuro', variable=self.dark_mode, command=self.apply_theme, style='Toggle.TCheckbutton').pack(side='right')
-        ttk.Label(frame, text='BD/BD.xlsx • primeira aba • 8 etiquetas por folha A4').pack(anchor='w', pady=(0, 12))
         search = ttk.Frame(frame)
         search.pack(fill='x')
         ttk.Label(search, text='Números dos pacientes:').pack(side='left')
@@ -151,12 +177,14 @@ class App(tk.Tk):
         self.numbers.bind('<Return>', lambda _: self.search())
         ttk.Button(search, text='Adicionar pacientes', command=self.search).pack(side='left')
         ttk.Label(frame, text='Separe os números por espaço, vírgula ou ponto e vírgula. Zeros à esquerda são aceitos.').pack(anchor='w', pady=5)
-        self.tree = ttk.Treeview(frame, columns=('numero', 'nome', 'nascimento', 'periodo', 'responsavel'), show='headings', height=10, selectmode='extended')
-        for key, title, width in [('numero','Nº MAIS VIDAS',110), ('nome','Nome completo',270), ('nascimento','Nascimento',100), ('periodo','Período ref.',160), ('responsavel','Resp. envio',160)]:
+        self.tree = ttk.Treeview(frame, columns=('numero', 'nome', 'nascimento', 'periodo', 'responsavel', 'quantidade'), show='headings', height=10, selectmode='extended')
+        for key, title, width in [('numero','Nº MAIS VIDAS',100), ('nome','Nome completo',230), ('nascimento','Nascimento',90), ('periodo','Período ref.',140), ('responsavel','Resp. envio',150), ('quantidade','Qtd. Etiq',80)]:
             self.tree.heading(key, text=title)
             self.tree.column(key, width=width)
         self.tree.pack(fill='both', expand=True, pady=8)
         self.tree.bind('<<TreeviewSelect>>', self.select)
+        self.tree.bind('<Double-1>', self.edit_quantity)
+        ttk.Label(frame, text='Dê dois cliques em Qtd. Etiq para alterar a quantidade. Mínimo: 1.').pack(anchor='w')
         ttk.Label(frame, text='Use Ctrl ou Shift para selecionar várias etiquetas. Campos vazios preservam os valores na edição em grupo.').pack(anchor='w')
         ttk.Button(frame, text='Selecionar todas', command=lambda: self.tree.selection_set(self.tree.get_children())).pack(anchor='w')
         editor = ttk.LabelFrame(frame, text='Preenchimento das etiquetas selecionadas', padding=10)
@@ -170,6 +198,11 @@ class App(tk.Tk):
         ttk.Button(editor, text='Aplicar às selecionadas', command=self.save_fields).grid(row=1, column=1, pady=8, sticky='w')
         ttk.Button(editor, text='Limpar período', command=self.clear_period).grid(row=1, column=2, padx=8)
         ttk.Button(editor, text='Remover selecionadas', command=self.remove).grid(row=1, column=3)
+        ttk.Label(editor, text='Qtd. Etiq em lote:').grid(row=2, column=0, sticky='w', pady=6)
+        self.batch_quantity = ttk.Spinbox(editor, from_=1, to=9999, width=8)
+        self.batch_quantity.set('1')
+        self.batch_quantity.grid(row=2, column=1, sticky='w', padx=8)
+        ttk.Button(editor, text='Aplicar quantidade às selecionadas', command=self.apply_batch_quantity).grid(row=2, column=2, columnspan=2, sticky='w', pady=6)
         controls = ttk.Frame(frame)
         controls.pack(fill='x', pady=12)
         ttk.Button(controls, text='Recarregar responsáveis', command=self.reload).pack(side='left')
@@ -179,6 +212,8 @@ class App(tk.Tk):
         self.start.set('1')
         self.start.pack(side='left', padx=5)
         ttk.Button(controls, text='Gerar PDF / imprimir', command=self.export).pack(side='right')
+        self.total_text = tk.StringVar(value='Total: 0 Etiquetas')
+        ttk.Label(controls, textvariable=self.total_text).pack(side='right', padx=10)
         ttk.Label(frame, text='Campos de recolhimento ficam em branco. No leitor de PDF, imprima em tamanho real (100%).').pack(anchor='w')
         self.reload()
 
@@ -226,9 +261,43 @@ class App(tk.Tk):
             messagebox.showerror('Responsáveis', str(exc))
 
     def refresh(self):
+        self.total_text.set(f"Total: {sum(quantidade(label.get('quantidade', 1)) for label in self.labels)} Etiquetas")
         self.tree.delete(*self.tree.get_children())
         for i, label in enumerate(self.labels):
-            self.tree.insert('', 'end', iid=str(i), values=[label[k] for k in ('numero','nome','nascimento','periodo','responsavel')])
+            self.tree.insert('', 'end', iid=str(i), values=valores_linha(label))
+
+    def edit_quantity(self, event):
+        item = self.tree.identify_row(event.y)
+        if not item or self.tree.identify_column(event.x) != '#6':
+            return
+        value = simpledialog.askstring('Qtd. Etiq', 'Quantidade de etiquetas desta linha (1 ou mais):',
+                                       initialvalue=str(self.labels[int(item)].get('quantidade', 1)), parent=self)
+        if value is None:
+            return
+        try:
+            count = quantidade(value)
+        except ValueError as exc:
+            messagebox.showerror('Quantidade inválida', str(exc))
+            return
+        self.labels[int(item)]['quantidade'] = count
+        self.tree.item(item, values=valores_linha(self.labels[int(item)]))
+        self.total_text.set(f"Total: {sum(quantidade(label.get('quantidade', 1)) for label in self.labels)} Etiquetas")
+
+    def apply_batch_quantity(self):
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showinfo('Quantidade em lote', 'Selecione uma ou mais linhas na lista.')
+            return
+        try:
+            count = quantidade(self.batch_quantity.get())
+        except ValueError as exc:
+            messagebox.showerror('Quantidade inválida', str(exc))
+            return
+        for item in selection:
+            label = self.labels[int(item)]
+            label['quantidade'] = count
+            self.tree.item(item, values=valores_linha(label))
+        self.total_text.set(f"Total: {sum(quantidade(label.get('quantidade', 1)) for label in self.labels)} Etiquetas")
 
     def search(self):
         try:
@@ -236,11 +305,11 @@ class App(tk.Tk):
             if not tokens or not tokens[0]:
                 raise ValueError('Informe pelo menos um número de paciente.')
             keys = list(dict.fromkeys(normalizar_numero(t) for t in tokens))
-            patients = carregar_pacientes(BASE / 'BD' / 'BD.xlsx')
+            patients = buscar_pacientes(keys)
             missing = [k for k in keys if k not in patients]
             for key in keys:
                 if key in patients:
-                    self.labels.append(dict(patients[key], periodo='', responsavel=''))
+                    self.labels.append(dict(patients[key], periodo='', responsavel='', quantidade=1))
             self.refresh()
             if missing:
                 messagebox.showwarning('Busca', 'Pacientes não encontrados: ' + ', '.join(missing))
@@ -271,13 +340,13 @@ class App(tk.Tk):
                 self.labels[index]['periodo'] = period
             if responsible or len(selection) == 1:
                 self.labels[index]['responsavel'] = responsible
-            self.tree.item(item, values=[self.labels[index][k] for k in ('numero','nome','nascimento','periodo','responsavel')])
+            self.tree.item(item, values=valores_linha(self.labels[index]))
 
     def clear_period(self):
         for item in self.tree.selection():
             index = int(item)
             self.labels[index]['periodo'] = ''
-            self.tree.item(item, values=[self.labels[index][k] for k in ('numero','nome','nascimento','periodo','responsavel')])
+            self.tree.item(item, values=valores_linha(self.labels[index]))
         self.period.delete(0, 'end')
 
     def remove(self):
@@ -315,8 +384,9 @@ class App(tk.Tk):
         try:
             if self.tree.selection():
                 self.save_fields()
-            if not self.labels:
-                raise ValueError('Adicione pelo menos uma etiqueta.')
+            printable = etiquetas_para_imprimir(self.labels)
+            if not printable:
+                raise ValueError('Adicione pelo menos uma etiqueta com quantidade maior que zero.')
             names = carregar_responsaveis()
             for index, label in enumerate(self.labels, 1):
                 if label['responsavel'] not in names:
@@ -324,7 +394,7 @@ class App(tk.Tk):
             start = int(self.start.get())
             path = filedialog.asksaveasfilename(defaultextension='.pdf', initialfile='etiquetas.pdf', filetypes=[('PDF','*.pdf')])
             if path:
-                gerar_pdf(path, self.labels, self.config_values, start)
+                gerar_pdf(path, printable, self.config_values, start)
                 messagebox.showinfo('PDF gerado', 'PDF gerado. Imprima em A4, tamanho real (100%), sem ajustar à página.')
                 os.startfile(path)
         except Exception as exc:
